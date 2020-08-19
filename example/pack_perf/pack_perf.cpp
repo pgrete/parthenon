@@ -74,7 +74,70 @@ void SimpleFluxDivergence(std::shared_ptr<Container<Real>> &in,
         }
         dudt(l, k, j, i) /= -coords.Volume(k, j, i);
       });
+}
 
+void SimpleFluxDivergenceOnMesh(parthenon::Mesh *pmesh) {
+  auto vinpack = parthenon::PackVariablesAndFluxesOnMesh(
+      pmesh, "base", std::vector<std::string>{"myvar"},
+      std::vector<std::string>{"myvar"});
+  auto dudtpack =
+      parthenon::PackVariablesOnMesh(pmesh, "dUdt", std::vector<std::string>{"myvar"});
+
+  IndexRange ib = vinpack.cellbounds.GetBoundsI(IndexDomain::interior);
+  IndexRange jb = vinpack.cellbounds.GetBoundsJ(IndexDomain::interior);
+  IndexRange kb = vinpack.cellbounds.GetBoundsK(IndexDomain::interior);
+
+  int ndim = pmesh->ndim;
+  const int Nl = vinpack.GetDim(4);
+  const int Nk = kb.e - kb.s + 1;
+  const int Nj = jb.e - jb.s + 1;
+  const int Ni = ib.e - ib.s + 1;
+  const int NjNi = Nj * Ni;
+  const int NkNjNi = Nk * NjNi;
+  const int NlNkNjNi = Nl * NkNjNi;
+  int num_blocks = vinpack.GetDim(5);
+
+  std::cout << "Going over " << num_blocks << " blocks." << std::endl;
+
+  Kokkos::Timer timer;
+
+  Kokkos::parallel_for(
+      "flux divergence",
+      parthenon::team_policy(parthenon::DevExecSpace(), num_blocks, Kokkos::AUTO),
+      KOKKOS_LAMBDA(parthenon::team_mbr_t team_member) {
+        const int b = team_member.league_rank();
+        const auto coords = vinpack.coords(b);
+        auto dudt = dudtpack(b);
+        auto vin = vinpack(b);
+
+        Kokkos::parallel_for(
+            Kokkos::TeamVectorRange<>(team_member, NlNkNjNi), [&](const int idx) {
+              const int l = idx / NkNjNi;
+              int k = (idx - l * NkNjNi) / NjNi;
+              int j = (idx - l * NkNjNi - k * NjNi) / Ni;
+              const int i = (idx - l * NkNjNi - k * NjNi - j * Ni) + ib.s;
+              j += jb.s;
+              k += kb.s;
+
+              dudt(l, k, j, i) = 0.0;
+              dudt(l, k, j, i) +=
+                  (coords.Area(X1DIR, k, j, i + 1) * vin.flux(X1DIR, l, k, j, i + 1) -
+                   coords.Area(X1DIR, k, j, i) * vin.flux(X1DIR, l, k, j, i));
+              if (ndim >= 2) {
+                dudt(l, k, j, i) +=
+                    (coords.Area(X2DIR, k, j + 1, i) * vin.flux(X2DIR, l, k, j + 1, i) -
+                     coords.Area(X2DIR, k, j, i) * vin.flux(X2DIR, l, k, j, i));
+              }
+              if (ndim == 3) {
+                dudt(l, k, j, i) +=
+                    (coords.Area(X3DIR, k + 1, j, i) * vin.flux(X3DIR, l, k + 1, j, i) -
+                     coords.Area(X3DIR, k, j, i) * vin.flux(X3DIR, l, k, j, i));
+              }
+              dudt(l, k, j, i) /= -coords.Volume(k, j, i);
+            });
+      });
+  Kokkos::fence();
+  std::cout << "Kernel took " << timer.seconds() << std::endl;
 }
 
 std::shared_ptr<StateDescriptor> Initialize(ParameterInput *pin) {

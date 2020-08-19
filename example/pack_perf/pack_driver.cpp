@@ -59,37 +59,35 @@ parthenon::DriverStatus PackDriver::Execute() {
 
   pouts->MakeOutputs(pmesh, pinput);
   const auto &num_it = pmesh->pblock->packages["pack_perf"]->Param<int>("num_it");
-    
-    MeshBlock *pmb = pmesh->pblock;
-    while (pmb != nullptr) {
-      auto &base = pmb->real_containers.Get();
+
+  MeshBlock *pmb = pmesh->pblock;
+  while (pmb != nullptr) {
+    auto &base = pmb->real_containers.Get();
     pmb->real_containers.Add("dUdt", base);
-      pmb = pmb->next;
-    }
+    pmb = pmb->next;
+  }
 
   Kokkos::Timer timer;
 
   for (auto i = 0; i < num_it; i++) {
-  if (pinput->GetOrAddBoolean("pack", "use_mesh_pack", false)) {
-    // Use the mesh pack and do it all in one step
-    pack_perf::ComputeAreaOnMesh(pmesh);
-  } else {
-    // not using the TaskList here so this is an idealized situation
-    // just measuring raw performance (not taking into account async execution) 
-    timer.reset();
-    MeshBlock *pmb = pmesh->pblock;
-    while (pmb != nullptr) {
-      auto &base = pmb->real_containers.Get();
-      auto &dUdt = pmb->real_containers.Get("dUdt");
-      pack_perf::SimpleFluxDivergence(base, dUdt);
-      //ParArrayND<Real> v = rc->Get("in_or_out").data;
+    if (pinput->GetOrAddBoolean("pack", "use_mesh_pack", false)) {
+      // Use the mesh pack and do it all in one step
+      pack_perf::SimpleFluxDivergenceOnMesh(pmesh);
+    } else {
+      // not using the TaskList here so this is an idealized situation
+      // just measuring raw performance (not taking into account async execution)
+      timer.reset();
+      MeshBlock *pmb = pmesh->pblock;
+      while (pmb != nullptr) {
+        auto &base = pmb->real_containers.Get();
+        auto &dUdt = pmb->real_containers.Get("dUdt");
+        pack_perf::SimpleFluxDivergence(base, dUdt);
 
-      pmb = pmb->next;
+        pmb = pmb->next;
+      }
+      Kokkos::fence();
+      std::cout << "Iteration " << i << " took " << timer.seconds() << std::endl;
     }
-  Kokkos::fence();
-  std::cout << "Iteration " << i << "took " << timer.seconds() << std::endl;
-  }
-
   }
   return DriverStatus::complete;
 }

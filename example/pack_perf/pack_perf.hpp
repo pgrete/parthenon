@@ -31,7 +31,7 @@ std::shared_ptr<StateDescriptor> Initialize(ParameterInput *pin);
 parthenon::TaskStatus ComputeArea(parthenon::MeshBlock *pmb);
 
 // Run task on the entire mesh at once
-Real ComputeAreaOnMesh(parthenon::Mesh *pmesh);
+void SimpleFluxDivergenceOnMesh(parthenon::Mesh *pmesh);
 } // namespace pack_perf
 
 #endif // EXAMPLE_CALCULATE_PI_CALCULATE_PI_HPP_
