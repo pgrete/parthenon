@@ -1,0 +1,54 @@
+# ========================================================================================
+#  Athena++ astrophysical MHD code
+#  Copyright(C) 2014 James M. Stone <jmstone@princeton.edu> and other code contributors
+#  Licensed under the 3-clause BSD License, see LICENSE file for details
+# ========================================================================================
+#  (C) (or copyright) 2020. Triad National Security, LLC. All rights reserved.
+#
+#  This program was produced under U.S. Government contract 89233218CNA000001 for Los
+#  Alamos National Laboratory (LANL), which is operated by Triad National Security, LLC
+#  for the U.S. Department of Energy/National Nuclear Security Administration. All rights
+#  in the program are reserved by Triad National Security, LLC, and the U.S. Department
+#  of Energy/National Nuclear Security Administration. The Government is granted for
+#  itself and others acting on its behalf a nonexclusive, paid-up, irrevocable worldwide
+#  license in this material to reproduce, prepare derivative works, distribute copies to
+#  the public, perform publicly and display publicly, and to permit others to do so.
+# ========================================================================================
+
+<parthenon/job>
+problem_id = pi_calculator
+
+<parthenon/mesh>
+refinement = none
+
+nx1 = 256
+x1min = -0.5
+x1max = 0.5
+ix1_bc = periodic
+ox1_bc = periodic
+
+nx2 = 256
+x2min = -0.5
+x2max = 0.5
+ix2_bc = periodic
+ox2_bc = periodic
+
+nx3 = 256
+x3min = -0.5
+x3max = 0.5
+ix3_bc = periodic
+ox3_bc = periodic
+
+<parthenon/meshblock>
+nx1 = 256
+nx2 = 256
+nx3 = 256
+
+
+<pack>
+# Whether or not to use mesh-wide kernel calls
+# A value of 0 is default task-based mechanism, where kernels are per meshblock
+# A value of 1 makes a single global kernel call over all meshblocks on a rank
+use_mesh_pack = false
+num_it = 10
+

@@ -185,7 +185,7 @@ endif()
 
 # We want Kokkos to be built with C++14, since that's what we're using in
 # Parthenon.
-set(Kokkos_CXX_STANDARD 14)
+set(Kokkos_CXX_STANDARD 14 CACHE STRING "CXX standard" FORCE)
 if(EXISTS ${Kokkos_ROOT}/CMakeLists.txt)
   add_subdirectory(${Kokkos_ROOT} Kokkos)
 elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/external/Kokkos/CMakeLists.txt)

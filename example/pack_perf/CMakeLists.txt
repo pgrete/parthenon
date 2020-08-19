@@ -11,8 +11,13 @@
 # the public, perform publicly and display publicly, and to permit others to do so.
 #=========================================================================================
 
-add_subdirectory(advection)
-add_subdirectory(calculate_pi)
-add_subdirectory(face_fields)
-add_subdirectory(kokkos_pi)
-add_subdirectory(pack_perf)
+get_property(DRIVER_LIST GLOBAL PROPERTY DRIVERS_USED_IN_TESTS)
+if( "pack_perf" IN_LIST DRIVER_LIST OR NOT PARTHENON_DISABLE_EXAMPLES)
+  add_executable(
+      pack_perf
+          pack_perf.cpp
+          pack_driver.cpp
+  )
+  target_link_libraries(pack_perf PUBLIC parthenon)
+  lint_target(pack_perf)
+endif()
