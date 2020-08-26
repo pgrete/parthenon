@@ -41,42 +41,7 @@ Packages_t ParthenonManager::ProcessPackages(std::unique_ptr<ParameterInput> &pi
 
 namespace pack_perf {
 
-void SimpleFluxDivergence(std::shared_ptr<Container<Real>> &in,
-                          std::shared_ptr<Container<Real>> &dudt_cont) {
-  MeshBlock *pmb = in->pmy_block;
-
-  const IndexDomain interior = IndexDomain::interior;
-  IndexRange ib = pmb->cellbounds.GetBoundsI(interior);
-  IndexRange jb = pmb->cellbounds.GetBoundsJ(interior);
-  IndexRange kb = pmb->cellbounds.GetBoundsK(interior);
-
-  auto vin = in->PackVariablesAndFluxes({Metadata::Independent});
-  auto dudt = dudt_cont->PackVariables({Metadata::Independent});
-
-  auto &coords = pmb->coords;
-  int ndim = pmb->pmy_mesh->ndim;
-  pmb->par_for(
-      "flux divergence", 0, vin.GetDim(4) - 1, kb.s, kb.e, jb.s, jb.e, ib.s, ib.e,
-      KOKKOS_LAMBDA(const int l, const int k, const int j, const int i) {
-        dudt(l, k, j, i) = 0.0;
-        dudt(l, k, j, i) +=
-            (coords.Area(X1DIR, k, j, i + 1) * vin.flux(X1DIR, l, k, j, i + 1) -
-             coords.Area(X1DIR, k, j, i) * vin.flux(X1DIR, l, k, j, i));
-        if (ndim >= 2) {
-          dudt(l, k, j, i) +=
-              (coords.Area(X2DIR, k, j + 1, i) * vin.flux(X2DIR, l, k, j + 1, i) -
-               coords.Area(X2DIR, k, j, i) * vin.flux(X2DIR, l, k, j, i));
-        }
-        if (ndim == 3) {
-          dudt(l, k, j, i) +=
-              (coords.Area(X3DIR, k + 1, j, i) * vin.flux(X3DIR, l, k + 1, j, i) -
-               coords.Area(X3DIR, k, j, i) * vin.flux(X3DIR, l, k, j, i));
-        }
-        dudt(l, k, j, i) /= -coords.Volume(k, j, i);
-      });
-}
-
-void SimpleFluxDivergenceOnMesh(parthenon::Mesh *pmesh) {
+void SimpleFluxDivergenceOnMesh(parthenon::Mesh *pmesh, const int num_it) {
   auto vinpack = parthenon::PackVariablesAndFluxesOnMesh(
       pmesh, "base", std::vector<std::string>{"myvar"},
       std::vector<std::string>{"myvar"});
@@ -95,49 +60,95 @@ void SimpleFluxDivergenceOnMesh(parthenon::Mesh *pmesh) {
   const int NjNi = Nj * Ni;
   const int NkNjNi = Nk * NjNi;
   const int NlNkNjNi = Nl * NkNjNi;
-  int num_blocks = vinpack.GetDim(5);
+  const int num_blocks = vinpack.GetDim(5);
+  const int Nb = num_blocks;
+  const int NbNlNkNjNi = Nb * NlNkNjNi;
 
   std::cout << "Going over " << num_blocks << " blocks." << std::endl;
 
   Kokkos::Timer timer;
 
-  Kokkos::parallel_for(
-      "flux divergence",
-      parthenon::team_policy(parthenon::DevExecSpace(), num_blocks, Kokkos::AUTO),
-      KOKKOS_LAMBDA(parthenon::team_mbr_t team_member) {
-        const int b = team_member.league_rank();
-        const auto coords = vinpack.coords(b);
-        auto dudt = dudtpack(b);
-        auto vin = vinpack(b);
+  for (auto ii = 0; ii < num_it; ii++) {
+    timer.reset();
 
-        Kokkos::parallel_for(
-            Kokkos::TeamVectorRange<>(team_member, NlNkNjNi), [&](const int idx) {
-              const int l = idx / NkNjNi;
-              int k = (idx - l * NkNjNi) / NjNi;
-              int j = (idx - l * NkNjNi - k * NjNi) / Ni;
-              const int i = (idx - l * NkNjNi - k * NjNi - j * Ni) + ib.s;
-              j += jb.s;
-              k += kb.s;
+    Kokkos::parallel_for(
+        "flux divergence",
+        parthenon::team_policy(parthenon::DevExecSpace(), num_blocks, Kokkos::AUTO),
+        KOKKOS_LAMBDA(parthenon::team_mbr_t team_member) {
+          const int b = team_member.league_rank();
+          const auto coords = vinpack.coords(b);
+          auto dudt = dudtpack(b);
+          auto vin = vinpack(b);
 
-              dudt(l, k, j, i) = 0.0;
-              dudt(l, k, j, i) +=
-                  (coords.Area(X1DIR, k, j, i + 1) * vin.flux(X1DIR, l, k, j, i + 1) -
-                   coords.Area(X1DIR, k, j, i) * vin.flux(X1DIR, l, k, j, i));
-              if (ndim >= 2) {
+          Kokkos::parallel_for(
+              Kokkos::TeamVectorRange<>(team_member, NlNkNjNi), [&](const int idx) {
+                const int l = idx / NkNjNi;
+                int k = (idx - l * NkNjNi) / NjNi;
+                int j = (idx - l * NkNjNi - k * NjNi) / Ni;
+                const int i = (idx - l * NkNjNi - k * NjNi - j * Ni) + ib.s;
+                j += jb.s;
+                k += kb.s;
+
+                dudt(l, k, j, i) = 0.0;
                 dudt(l, k, j, i) +=
-                    (coords.Area(X2DIR, k, j + 1, i) * vin.flux(X2DIR, l, k, j + 1, i) -
-                     coords.Area(X2DIR, k, j, i) * vin.flux(X2DIR, l, k, j, i));
-              }
-              if (ndim == 3) {
-                dudt(l, k, j, i) +=
-                    (coords.Area(X3DIR, k + 1, j, i) * vin.flux(X3DIR, l, k + 1, j, i) -
-                     coords.Area(X3DIR, k, j, i) * vin.flux(X3DIR, l, k, j, i));
-              }
-              dudt(l, k, j, i) /= -coords.Volume(k, j, i);
-            });
-      });
-  Kokkos::fence();
-  std::cout << "Kernel took " << timer.seconds() << std::endl;
+                    (coords.Area(X1DIR, k, j, i + 1) * vin.flux(X1DIR, l, k, j, i + 1) -
+                     coords.Area(X1DIR, k, j, i) * vin.flux(X1DIR, l, k, j, i));
+                if (ndim >= 2) {
+                  dudt(l, k, j, i) +=
+                      (coords.Area(X2DIR, k, j + 1, i) * vin.flux(X2DIR, l, k, j + 1, i) -
+                       coords.Area(X2DIR, k, j, i) * vin.flux(X2DIR, l, k, j, i));
+                }
+                if (ndim == 3) {
+                  dudt(l, k, j, i) +=
+                      (coords.Area(X3DIR, k + 1, j, i) * vin.flux(X3DIR, l, k + 1, j, i) -
+                       coords.Area(X3DIR, k, j, i) * vin.flux(X3DIR, l, k, j, i));
+                }
+                dudt(l, k, j, i) /= -coords.Volume(k, j, i);
+              });
+        });
+    Kokkos::fence();
+    std::cout << "MB " << Ni << " Iteration " << ii << " using "
+              << "SimpleTP"
+              << " took " << timer.seconds() << std::endl;
+  }
+  for (auto ii = 0; ii < num_it; ii++) {
+    timer.reset();
+
+    Kokkos::parallel_for(
+        "flux divergence", Kokkos::RangePolicy<>(0, NbNlNkNjNi),
+        KOKKOS_LAMBDA(const int &idx) {
+          const int b = idx / NlNkNjNi;
+          const int l = (idx - b * NlNkNjNi) / NkNjNi;
+          int k = (idx - b * NlNkNjNi - l * NkNjNi) / NjNi;
+          int j = (idx - b * NlNkNjNi - l * NkNjNi - k * NjNi) / Ni;
+          const int i = idx - b * NlNkNjNi - l * NkNjNi - k * NjNi - j * Ni + ib.s;
+          k += kb.s;
+          j += jb.s;
+          const auto coords = vinpack.coords(b);
+          auto dudt = dudtpack(b);
+          auto vin = vinpack(b);
+
+          dudt(l, k, j, i) = 0.0;
+          dudt(l, k, j, i) +=
+              (coords.Area(X1DIR, k, j, i + 1) * vin.flux(X1DIR, l, k, j, i + 1) -
+               coords.Area(X1DIR, k, j, i) * vin.flux(X1DIR, l, k, j, i));
+          if (ndim >= 2) {
+            dudt(l, k, j, i) +=
+                (coords.Area(X2DIR, k, j + 1, i) * vin.flux(X2DIR, l, k, j + 1, i) -
+                 coords.Area(X2DIR, k, j, i) * vin.flux(X2DIR, l, k, j, i));
+          }
+          if (ndim == 3) {
+            dudt(l, k, j, i) +=
+                (coords.Area(X3DIR, k + 1, j, i) * vin.flux(X3DIR, l, k + 1, j, i) -
+                 coords.Area(X3DIR, k, j, i) * vin.flux(X3DIR, l, k, j, i));
+          }
+          dudt(l, k, j, i) /= -coords.Volume(k, j, i);
+        });
+    Kokkos::fence();
+    std::cout << "MB " << Ni << " Iteration " << ii << " using "
+              << "flatpack"
+              << " took " << timer.seconds() << std::endl;
+  }
 }
 
 std::shared_ptr<StateDescriptor> Initialize(ParameterInput *pin) {

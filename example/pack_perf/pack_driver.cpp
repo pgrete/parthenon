@@ -69,25 +69,34 @@ parthenon::DriverStatus PackDriver::Execute() {
 
   Kokkos::Timer timer;
 
-  for (auto i = 0; i < num_it; i++) {
-    if (pinput->GetOrAddBoolean("pack", "use_mesh_pack", false)) {
-      // Use the mesh pack and do it all in one step
-      pack_perf::SimpleFluxDivergenceOnMesh(pmesh);
-    } else {
-      // not using the TaskList here so this is an idealized situation
-      // just measuring raw performance (not taking into account async execution)
-      timer.reset();
-      MeshBlock *pmb = pmesh->pblock;
-      while (pmb != nullptr) {
-        auto &base = pmb->real_containers.Get();
-        auto &dUdt = pmb->real_containers.Get("dUdt");
-        pack_perf::SimpleFluxDivergence(base, dUdt);
+  if (pinput->GetOrAddBoolean("pack", "use_mesh_pack", false)) {
+    // Use the mesh pack and do it all in one step
+    pack_perf::SimpleFluxDivergenceOnMesh(pmesh, num_it);
+  } else {
+    auto f = [&](auto loop_pattern, auto name) {
+      for (auto i = 0; i < num_it; i++) {
+        // not using the TaskList here so this is an idealized situation
+        // just measuring raw performance (not taking into account async execution)
+        MeshBlock *pmb = pmesh->pblock;
+        auto range = pmb->cellbounds.GetBoundsI(IndexDomain::interior);
+        timer.reset();
+        while (pmb != nullptr) {
+          auto &base = pmb->real_containers.Get();
+          auto &dUdt = pmb->real_containers.Get("dUdt");
+          pack_perf::SimpleFluxDivergence(loop_pattern, base, dUdt);
 
-        pmb = pmb->next;
+          pmb = pmb->next;
+        }
+        Kokkos::fence();
+        std::cout << "MB " << range.e - range.s + 1 << " Iteration " << i << " using "
+                  << name << " took " << timer.seconds() << std::endl;
       }
-      Kokkos::fence();
-      std::cout << "Iteration " << i << " took " << timer.seconds() << std::endl;
-    }
+    };
+    f(parthenon::loop_pattern_flatrange_tag, "flatrange");
+    f(parthenon::loop_pattern_mdrange_tag, "mdrange");
+    f(parthenon::loop_pattern_tpttr_tag, "TPTTR");
+    f(parthenon::loop_pattern_tptvr_tag, "TPTVR");
+    f(parthenon::loop_pattern_tpttrtvr_tag, "TPTTRTVR");
   }
   return DriverStatus::complete;
 }
